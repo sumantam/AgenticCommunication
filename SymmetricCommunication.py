@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 from numba import njit
+from typing import TextIO
 
 
 @njit
@@ -82,7 +83,7 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
 
 Tmax = 1000 #0.5 #0.2
-mu1 = 0.3
+mu1 = 0.5
 mu2 = 1.2
 interval = .1 #.001
 alpha = -0.11 #-0.01 #-0.005
@@ -341,124 +342,172 @@ def UpdateReceiver(
 #Call before the interaction
 # running_min_arm1_agnt1, running_min_arm2_agnt1, E_arm1_a1, E_arm2_a1, indx1_a1, indx2_a1 = ExchangeArms(mu1,mu2, time, alpha)
 
-if os.path.exists("symmetric.csv"):
-    os.remove("symmetric.csv")
+def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
+    if os.path.exists("symmetric.csv"):
+        os.remove("symmetric.csv")
 
-if os.path.exists("symmetric_negJump.csv"):
-    os.remove("symmetric_negJump.csv")
+    if os.path.exists("symmetric_negJump.csv"):
+        os.remove("symmetric_negJump.csv")
+            
+    ss = np.random.SeedSequence(1230987654)
+
+
+    for child in ss.spawn(50000):
+        r1, r2, r3, r4 = child.generate_state(4)
+
+        (running_min_arm1_agnt1, running_min_arm2_agnt1, 
+        Est_mu_arm1_a1, Est_mu_arm2_a1,  
+        E_arm1_a1, E_arm2_a1, 
+        indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, r1, r2, alpha)
         
-ss = np.random.SeedSequence(1230987654)
+        (running_min_arm1_agnt2, running_min_arm2_agnt2,
+        Est_mu_arm1_a2, Est_mu_arm2_a2, 
+        E_arm1_a2, E_arm2_a2, 
+        indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, r3, r4, alpha)
 
+        #Calculate the jump index
 
-for child in ss.spawn(50000):
-    r1, r2, r3, r4 = child.generate_state(4)
+        print(f"indx1_a1={indx1_a1}, indx2_a1={indx2_a1}, indx1_a2={indx1_a2}, indx2_a2={indx2_a2}")
+        print(f"E_arm1_a1, E_arm2_a1={E_arm1_a1, E_arm2_a1}, E_arm1_a2, E_arm2_a2={E_arm1_a2, E_arm2_a2} ")
+        max_a1 = max(indx1_a1, indx2_a1)
+        max_a2 = max(indx1_a2, indx2_a2)
 
-    (running_min_arm1_agnt1, running_min_arm2_agnt1, 
-    Est_mu_arm1_a1, Est_mu_arm2_a1,  
-    E_arm1_a1, E_arm2_a1, 
-    indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, r1, r2, alpha)
-    
-    (running_min_arm1_agnt2, running_min_arm2_agnt2,
-     Est_mu_arm1_a2, Est_mu_arm2_a2, 
-     E_arm1_a2, E_arm2_a2, 
-     indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, r3, r4, alpha)
+        giver = 2 if max_a1 > max_a2 else 1
 
-    #Calculate the jump index
+        if (giver == 2) :
+            jump_idx = max_a2
+        else:
+            jump_idx = max_a1
 
-    print(f"indx1_a1={indx1_a1}, indx2_a1={indx2_a1}, indx1_a2={indx1_a2}, indx2_a2={indx2_a2}")
-    print(f"E_arm1_a1, E_arm2_a1={E_arm1_a1, E_arm2_a1}, E_arm1_a2, E_arm2_a2={E_arm1_a2, E_arm2_a2} ")
-    max_a1 = max(indx1_a1, indx2_a1)
-    max_a2 = max(indx1_a2, indx2_a2)
+        print(f"giver={giver}, jump_idx={jump_idx}")
 
-    giver = 2 if max_a1 > max_a2 else 1
+        # print (E_arm1_a2)
 
-    if (giver == 2) :
-        jump_idx = max_a2
-    else:
-        jump_idx = max_a1
+        if (jump_idx < 0):
+            with open("symmetric_negJump.csv", "a") as f:
+                val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
+                val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
+                
+                f.write(
+                    f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
+                    f"{val1}, "
+                    f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
+                    f"{val2} \n "
+                )
+            continue
 
-    print(f"giver={giver}, jump_idx={jump_idx}")
+                
+        receiver_min_arm1_agnt1, receiver_min_arm2_agnt1 = UpdateReceiver(
+            running_min_arm1_agnt1,
+            running_min_arm2_agnt1,
+            jump_idx,
+            np.cumsum(E_arm1_a1)[jump_idx],
+            np.cumsum(E_arm2_a1)[jump_idx],
+            np.cumsum(E_arm1_a2)[jump_idx],
+            np.cumsum(E_arm2_a2)[jump_idx],
+            alpha,
+            r1,r2,
+            mu1,mu2
+        )
+        
+        receiver_min_arm1_agnt2, receiver_min_arm2_agnt2 = UpdateReceiver(
+            running_min_arm1_agnt2,
+            running_min_arm2_agnt2,
+            jump_idx,
+            np.cumsum(E_arm1_a2)[jump_idx],
+            np.cumsum(E_arm2_a2)[jump_idx],
+            np.cumsum(E_arm1_a1)[jump_idx],
+            np.cumsum(E_arm2_a1)[jump_idx],
+            alpha,
+            r3,r4,
+            mu1, mu2
+        )
+        
+        with open("symmetric.csv", "a") as f:
+            val1 = 1 if receiver_min_arm1_agnt1[-1] < receiver_min_arm2_agnt1[-1] else 0
+            val2 = 1 if receiver_min_arm1_agnt2[-1] < receiver_min_arm2_agnt2[-1] else 0
 
-    # print (E_arm1_a2)
-
-    if (jump_idx < 0):
-        with open("symmetric_negJump.csv", "a") as f:
-            val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
-            val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
+            valb1 = 1 if Est_mu_arm1_a1[jump_idx] < Est_mu_arm2_a1[jump_idx] else 0
+            valb2 = 1 if Est_mu_arm1_a2[jump_idx] < Est_mu_arm2_a2[jump_idx] else 0
             
             f.write(
-                f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
+                f"{receiver_min_arm1_agnt1[-1]}, {receiver_min_arm2_agnt1[-1]}, "
                 f"{val1}, "
-                f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
-                f"{val2} \n "
+                f"{receiver_min_arm1_agnt2[-1]}, {receiver_min_arm2_agnt2[-1]}, "
+                f"{val2}, "
+                f"{giver}, "
+                f"{np.cumsum(E_arm1_a2)[jump_idx] + np.cumsum(E_arm2_a2)[jump_idx]}, "
+                f"{np.cumsum(E_arm1_a1)[jump_idx] + np.cumsum(E_arm2_a1)[jump_idx]}, "
+                f"{jump_idx} ,"
+                f"{valb1|valb2}, {val1|val2}, {1 - ((valb1|valb2)^(val1|val2))} \n"
             )
-        continue
 
+    if os.path.exists("symmetric.csv"):
+        ff_symmetric = pd.read_csv("symmetric.csv")
+        ff_negjumps = pd.read_csv("symmetric_negJump.csv")
             
-    receiver_min_arm1_agnt1, receiver_min_arm2_agnt1 = UpdateReceiver(
-        running_min_arm1_agnt1,
-        running_min_arm2_agnt1,
-        jump_idx,
-        np.cumsum(E_arm1_a1)[jump_idx],
-        np.cumsum(E_arm2_a1)[jump_idx],
-        np.cumsum(E_arm1_a2)[jump_idx],
-        np.cumsum(E_arm2_a2)[jump_idx],
-        alpha,
-        r1,r2,
-        mu1,mu2
-    )
-    
-    receiver_min_arm1_agnt2, receiver_min_arm2_agnt2 = UpdateReceiver(
-        running_min_arm1_agnt2,
-        running_min_arm2_agnt2,
-        jump_idx,
-        np.cumsum(E_arm1_a2)[jump_idx],
-        np.cumsum(E_arm2_a2)[jump_idx],
-        np.cumsum(E_arm1_a1)[jump_idx],
-        np.cumsum(E_arm2_a1)[jump_idx],
-        alpha,
-        r3,r4,
-        mu1, mu2
-    )
-    
-    with open("symmetric.csv", "a") as f:
-        val1 = 1 if receiver_min_arm1_agnt1[-1] < receiver_min_arm2_agnt1[-1] else 0
-        val2 = 1 if receiver_min_arm1_agnt2[-1] < receiver_min_arm2_agnt2[-1] else 0
-
-        valb1 = 1 if Est_mu_arm1_a1[jump_idx] < Est_mu_arm2_a1[jump_idx] else 0
-        valb2 = 1 if Est_mu_arm1_a2[jump_idx] < Est_mu_arm2_a2[jump_idx] else 0
+        count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
+                (ff_symmetric.iloc[:, 5] == 0)).sum()
         
-        f.write(
-            f"{receiver_min_arm1_agnt1[-1]}, {receiver_min_arm2_agnt1[-1]}, "
-            f"{val1}, "
-            f"{receiver_min_arm1_agnt2[-1]}, {receiver_min_arm2_agnt2[-1]}, "
-            f"{val2}, "
-            f"{giver}, "
-            f"{np.cumsum(E_arm1_a2)[jump_idx] + np.cumsum(E_arm2_a2)[jump_idx]}, "
-            f"{np.cumsum(E_arm1_a1)[jump_idx] + np.cumsum(E_arm2_a1)[jump_idx]}, "
-            f"{jump_idx} ,"
-            f"{valb1|valb2}, {val1|val2}, {1 - ((valb1|valb2)^(val1|val2))} \n"
-        )
-
-if os.path.exists("symmetric.csv"):
-    ff_symmetric = pd.read_csv("symmetric.csv")
-    ff_negjumps = pd.read_csv("symmetric_negJump.csv")
         
-    count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
-              (ff_symmetric.iloc[:, 5] == 0)).sum()
-    
-    
-    count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
-              (ff_negjumps.iloc[:, 5] == 0)).sum()
-    
-    print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
-    print(f"Count2 = {count2+ count1} \n")
+        count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
+                (ff_negjumps.iloc[:, 5] == 0)).sum()
+        
+        outfile.write(fr"{alpha} & {ff_symmetric.shape[0]} & {count1} & {count2 + count1} \\ \hline")
+        outfile.write("\n")
+        
+        print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
+        print(f"Count2 = {count2+ count1} \n")
 
-else :
-    ff_negjumps = pd.read_csv("symmetric_negJump.csv")
+    else :
+        ff_negjumps = pd.read_csv("symmetric_negJump.csv")
+        
+        count1 = 0
+        count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
+                (ff_negjumps.iloc[:, 5] == 0)).sum()
+        
+        outfile.write(fr"{alpha} & {count1} & {count1} & {count2 + count1} \\ \hline")
+        outfile.write("\n")
+        
+        print(f"Count = \n", 0)
+        print(f"Count2 = {count2} \n")
+        
+# main block 
+
+fileName = "Symmetric_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
+
+if os.path.exists(fileName):
+    os.remove(fileName) 
+       
     
-    count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
-              (ff_negjumps.iloc[:, 5] == 0)).sum()
+ll = [-3.0, -0.46, -0.41, -0.36, -0.31, -0.26, -0.21, -0.16, -0.11, -0.06, -0.03, -0.01]
+#ll = [-3.0, -0.46, -0.41, -0.36]
+
+file: TextIO = open(fileName, "a")
+file.write(r"""
+\begin{table}[h!]
+\centering
+{\tiny
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|p{1cm}|p{1.1cm}|p{1.1cm}|}
+\hline
+$\alpha$
+& {\fontsize{7}{9}\selectfont Total Communication}
+& {\fontsize{7}{9}\selectfont Symmetric sub optimal}
+& {\fontsize{7}{9}\selectfont Symmetric + Non Communicating}
+\\
+\hline
+""")
+
+for ele in ll:
+    alpha = ele     
+    Communication(mu1, mu2, alpha, file)
     
-    print(f"Count = \n", 0)
-    print(f"Count2 = {count2} \n")
+file.write(r"""
+\end{tabular}
+}
+}
+\end{table}
+""")
+
+file.close()
