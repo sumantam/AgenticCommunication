@@ -6,6 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 from numba import njit
+from typing import TextIO
+from time import sleep
 
 
 @njit
@@ -246,89 +248,87 @@ def UpdateReceiver(
 #Call before the interaction
 # running_min_arm1_agnt1, running_min_arm2_agnt1, E_arm1_a1, E_arm2_a1, indx1_a1, indx2_a1 = ExchangeArms(mu1,mu2, time, alpha)
 
-if os.path.exists("nocommunication.csv"):
-    os.remove("nocommunication.csv")
 
-    
-ss = np.random.SeedSequence(1230987654)
+def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
+    if os.path.exists("nocommunication.csv"):
+        os.remove("nocommunication.csv")
 
-
-for child in ss.spawn(50000):
-    r1, r2, r3, r4 = child.generate_state(4)
-
-    (running_min_arm1_agnt1, running_min_arm2_agnt1, 
-     Est_mu_arm1_a1, Est_mu_arm2_a1, 
-     E_arm1_a1, E_arm2_a1, 
-     indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, alpha,r1, r2)
-
-    (running_min_arm1_agnt2, running_min_arm2_agnt2, 
-     Est_mu_arm1_a2, Est_mu_arm2_a2, 
-     E_arm1_a2, E_arm2_a2, 
-     indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, alpha,r3, r4)
-
-
-    with open("nocommunication.csv", "a") as f:
-            val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
-            val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
-
-            f.write(
-                f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
-                f"{val1}, "
-                f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
-                f"{val2}, "
-                f"\n"
-            )
-
-if os.path.exists("nocommunication.csv"):
-    ff_symmetric = pd.read_csv("nocommunication.csv")
         
-    count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
-              (ff_symmetric.iloc[:, 5] == 0)).sum()
+    ss = np.random.SeedSequence(1230987654)
+
+
+    for child in ss.spawn(50000):
+        r1, r2, r3, r4 = child.generate_state(4)
+
+        (running_min_arm1_agnt1, running_min_arm2_agnt1, 
+        Est_mu_arm1_a1, Est_mu_arm2_a1, 
+        E_arm1_a1, E_arm2_a1, 
+        indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, alpha,r1, r2)
+
+        (running_min_arm1_agnt2, running_min_arm2_agnt2, 
+        Est_mu_arm1_a2, Est_mu_arm2_a2, 
+        E_arm1_a2, E_arm2_a2, 
+        indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, alpha,r3, r4)
+
+
+        with open("nocommunication.csv", "a") as f:
+                val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
+                val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
+
+                f.write(
+                    f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
+                    f"{val1}, "
+                    f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
+                    f"{val2}, "
+                    f"\n"
+                )
+
+    if os.path.exists("nocommunication.csv"):
+        ff_symmetric = pd.read_csv("nocommunication.csv")
+            
+        count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
+                (ff_symmetric.iloc[:, 5] == 0)).sum()
+        
+        outfile.write(fr"{alpha} & {ff_symmetric.shape[0]} & {count1} \\ \hline")
+        outfile.write("\n")
+        print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
+        
+
+fileName = "NoCommunication_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
+
+if os.path.exists(fileName):
+    os.remove(fileName) 
+       
     
+#ll = [-3.0, -0.46, -0.41, -0.36, -0.31, -0.26, -0.21, -0.16, -0.11, -0.06, -0.03, -0.01]
+ll = [-3.0, -0.46]
+
+file: TextIO = open(fileName, "a")
+file.write(r"""
+\begin{table}[h!]
+\centering
+{\tiny
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|p{1cm}|p{1.1cm}|}
+\hline
+$\alpha$
+& {\fontsize{7}{9}\selectfont Total Communication}
+& {\fontsize{7}{9}\selectfont No communication sub optimal}
+\\
+\hline
+""")
+
+for ele in ll:
+    alpha = ele 
+    print(f"Alpha {alpha}") 
+    sleep(30)   
+    Communication(mu1, mu2, alpha, file)
     
-    print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
+file.write(r"""
+\end{tabular}
+}
+}
+\end{table}
+""")
 
-exit()
-#Calculate the jump index
-
-print(f"indx1_a1={indx1_a1}, indx2_a1={indx2_a1}, indx1_a2={indx1_a2}, indx2_a2={indx2_a2}")
-max_a1 = max(indx1_a1, indx2_a1)
-max_a2 = max(indx1_a2, indx2_a2)
-
-giver = 2 if max_a1 > max_a2 else 1
-
-if (giver == 2) :
-    jump_idx = max_a2
-else:
-    jump_idx = max_a1
-
-print(f"giver={giver}, jump_idx={jump_idx}")
-
-print (E_arm1_a2)
-
-
-if giver == 1:
-    receiver_min_arm1_agnt, receiver_min_arm2_agnt = UpdateReceiver(
-        running_min_arm1_agnt2,
-        running_min_arm2_agnt2,
-        jump_idx,
-        np.cumsum(E_arm1_a2),
-        np.cumsum(E_arm2_a2),
-        np.cumsum(E_arm1_a1),
-        np.cumsum(E_arm2_a1),
-        alpha
-    )
-else:
-    receiver_min_arm1_agnt, receiver_min_arm2_agnt = UpdateReceiver(
-        running_min_arm1_agnt1,
-        running_min_arm2_agnt1,
-        jump_idx,
-        np.sum(E_arm1_a1),
-        np.sum(E_arm2_a1),
-        np.sum(E_arm1_a2),
-        np.sum(E_arm2_a2),
-        alpha
-    )
-
-
-    
+file.close()
