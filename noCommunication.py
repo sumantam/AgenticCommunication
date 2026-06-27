@@ -82,10 +82,10 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
     return running_min_arm1, running_min_arm2, Est_mu_arm1, Est_mu_arm2, E_arm1, E_arm2, index1, index2
 
 Tmax = 1000 #0.5 #0.2
-mu1 = 0.3
+mu1 = 1.0
 mu2 = 1.2
 interval = .1 #.001
-alpha = -0.11 #-0.01 #-0.005
+# alpha = -0.11 #-0.01 #-0.005
 
 # Break down the time into small intervals
 time = np.arange(0, Tmax, interval)
@@ -300,8 +300,8 @@ if os.path.exists(fileName):
     os.remove(fileName) 
        
     
-#ll = [-3.0, -0.46, -0.41, -0.36, -0.31, -0.26, -0.21, -0.16, -0.11, -0.06, -0.03, -0.01]
-ll = [-3.0, -0.46]
+ll = [-3.0, -0.46, -0.41, -0.36, -0.31, -0.26, -0.21, -0.16, -0.11, -0.06, -0.03, -0.01]
+#ll = [-3.0, -0.46]
 
 file: TextIO = open(fileName, "a")
 file.write(r"""

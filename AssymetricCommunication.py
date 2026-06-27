@@ -83,10 +83,10 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
 
 Tmax = 1000 #0.5 #0.2
-mu1 = 0.5
+mu1 = 1.0
 mu2 = 1.2
 interval = .1 #.001
-alpha = -0.11 #-0.01 #-0.005
+# alpha = -0.11 #-0.01 #-0.005
 
 # Break down the time into small intervals
 time = np.arange(0, Tmax, interval)
