@@ -1,35 +1,30 @@
+import concurrent.futures
 import matplotlib
-matplotlib.use('TkAgg')
-
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 import os
+import pandas as pd
 from numba import njit
 from typing import TextIO
 
+matplotlib.use("TkAgg")
 
+# --- Numba Compiled Subroutines (Ultra-Fast Math Execution) ---
 @njit
-def min_accumulate ( Est_mu_arm):
+def min_accumulate(Est_mu_arm):
     n = len(Est_mu_arm)
     running_min_arm = np.empty(n)
-    
     running_min_arm[0] = Est_mu_arm[0]
-    
     for i in range(1, n):
-        if Est_mu_arm[i] < running_min_arm[i-1]:
+        if Est_mu_arm[i] < running_min_arm[i - 1]:
             running_min_arm[i] = Est_mu_arm[i]
         else:
-            running_min_arm[i] = running_min_arm[i-1]
-
+            running_min_arm[i] = running_min_arm[i - 1]
     return running_min_arm
-    
 
-@njit #(forceobj=True)
+
+@njit
 def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
-
     n = len(time)
-
     X_arm1 = np.zeros(n)
     X_arm2 = np.zeros(n)
     E_arm1 = np.zeros(n)
@@ -43,25 +38,22 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
     cum2 = 0
 
     for i in range(1, n):
-
-        mask = Est_mu_arm1[i-1] >= Est_mu_arm2[i-1]
-
+        mask = Est_mu_arm1[i - 1] >= Est_mu_arm2[i - 1]
         if mask:
             cum1 += 1
-            X_arm1[i] = X_arm1[i-1] + (mu1*interval + dB1[arm1_indx])
+            X_arm1[i] = X_arm1[i - 1] + (mu1 * interval + dB1[arm1_indx])
             arm1_indx += 1
-            X_arm2[i] = X_arm2[i-1]
+            X_arm2[i] = X_arm2[i - 1]
         else:
             cum2 += 1
-            X_arm2[i] = X_arm2[i-1] + (mu2*interval + dB2[arm2_indx])
+            X_arm2[i] = X_arm2[i - 1] + (mu2 * interval + dB2[arm2_indx])
             arm2_indx += 1
-            X_arm1[i] = X_arm1[i-1]
+            X_arm1[i] = X_arm1[i - 1]
 
         E_arm1[i] = mask
         E_arm2[i] = 1 - mask
-
-        Est_mu_arm1[i] = X_arm1[i] / (1 + cum1*interval)
-        Est_mu_arm2[i] = X_arm2[i] / (1 + cum2*interval)
+        Est_mu_arm1[i] = X_arm1[i] / (1 + cum1 * interval)
+        Est_mu_arm2[i] = X_arm2[i] / (1 + cum2 * interval)
 
     running_min_arm1 = min_accumulate(Est_mu_arm1)
     running_min_arm2 = min_accumulate(Est_mu_arm2)
@@ -78,413 +70,301 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
             index2 = i
             break
 
-    return running_min_arm1, running_min_arm2, Est_mu_arm1, Est_mu_arm2, E_arm1, E_arm2, index1, index2
+    return (
+        running_min_arm1,
+        running_min_arm2,
+        Est_mu_arm1,
+        Est_mu_arm2,
+        E_arm1,
+        E_arm2,
+        index1,
+        index2,
+    )
 
 
-
-Tmax = 1000 #0.5 #0.2
-mu1 = 1.0
-mu2 = 1.2
-interval = .1 #.001
-# alpha = -0.11 #-0.01 #-0.005
-
-# Break down the time into small intervals
-time = np.arange(0, Tmax, interval)
-
-# This function is the main subroutine of Ankur's paper
-# @njit
-def ExchangeArms(mu1, mu2, time, r1, r2, alpha = 0.0):
-
-    n = len(time)
-    dt = time[5] - time[4]
-
-    rng = np.random.default_rng(r1)
-    # pre-generate Brownian increments
-    dB1 = rng.normal(0, np.sqrt(interval), size=n)
-    rng = np.random.default_rng(r2)
-    dB2 = rng.normal(0, np.sqrt(interval), size=n)
-
-    # print(np.mean(dB1), np.mean(dB2))
-    # print(np.sum(dB1 > 0), np.sum(dB1 < 0))
-    # print(np.sum(dB2 > 0), np.sum(dB2 < 0))
-    
-    
-    res = FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval)
-    
-    running_min_arm1 = res[0]
-    running_min_arm2 = res[1]
-    Est_mu_arm1 = res[2]
-    Est_mu_arm2 = res[3]
-    E_arm1 = res[4]
-    E_arm2 = res[5]
-    index1 = res[6]
-    index2 = res[7]
-    
-    # # print(running_min_arm1)
-    # df = pd.DataFrame ({
-    #                 "min_arm1":running_min_arm1,
-    #                 "min_arm2":running_min_arm2,
-    #                 "mu_1": Est_mu_arm1,
-    #                 "mu_2": Est_mu_arm2,
-    #                 "effort_arm1":np.cumsum(E_arm1),
-    #                 "effort_arm2":np.cumsum(E_arm2),
-    #                 "BM1": np.cumsum(dB1),
-    #                 "BM2": np.cumsum(dB2)
-    #                 })
-    # # # df.to_excel("arm.xlsx", index=False)
-    
-    
-    # fig = plt.figure(figsize=(10,6))
-    # fig.canvas.manager.set_window_title("Pre Interaction")
-    # # Plot estimated means (or running processes)
-    # plt.plot(df["mu_1"], label=f"Arm 1 = {mu1}", color="blue")
-    # plt.plot(df["mu_2"], label=f"Arm 2 = {mu2}", color="green")
-
-    # plt.xlabel("Time")
-    # plt.ylabel("Value")
-    # plt.title("Arm Estimates / Brownian Motion with Drift")
-
-    # plt.legend()
-    # plt.grid(True)
-
-    # plt.show()
-
-        
-    # print(f"Last element of mu arm1 = {Est_mu_arm1[-1]}, Last element of mu arm2 = {Est_mu_arm2[-1]}")
-    return running_min_arm1, running_min_arm2, Est_mu_arm1, Est_mu_arm2, E_arm1, E_arm2,  index1, index2 
-    # return X_arm1, X_arm2
-
-#This function is the part which simulates the dynamics post interaction.
-@njit 
+@njit
 def FastUpdateReceiver(
-        recv_arm1,     
-        recv_arm2,
-        jmp_indx ,
-        recv_Jmp_E_arm1,
-        recv_Jmp_E_arm2,
-        prov_Jmp_E_arm1,
-        prov_Jmp_E_arm2,
-        level,
-        dB1,dB2, 
-        mu1, mu2, 
-        time = time
+    recv_arm1,
+    recv_arm2,
+    jmp_indx,
+    recv_Jmp_E_arm1,
+    recv_Jmp_E_arm2,
+    prov_Jmp_E_arm1,
+    prov_Jmp_E_arm2,
+    level,
+    dB1,
+    dB2,
+    mu1,
+    mu2,
+    dt,
 ):
-    n = len(time)
-    dt = time[1] - time[0]
-
+    n = len(recv_arm1)
     E_arm1 = np.zeros(n)
     E_arm2 = np.zeros(n)
 
-    running_min_arm1 = recv_arm1 # This will have the running minimum after the shock
-    running_min_arm2 = recv_arm2 # This will have the running minimum after the shock
-    
-    print(f"recv_Jmp_E_arm1 ,  prov_Jmp_E_arm1 = {recv_Jmp_E_arm1,  prov_Jmp_E_arm1} \n")
-    print(f"recv_Jmp_E_arm2 ,  prov_Jmp_E_arm2 = {recv_Jmp_E_arm2,  prov_Jmp_E_arm2} \n")
     E_arm1[jmp_indx] = recv_Jmp_E_arm1 + prov_Jmp_E_arm1
     E_arm2[jmp_indx] = recv_Jmp_E_arm2 + prov_Jmp_E_arm2
-    
-    recv_arm1[jmp_indx] = (
-        recv_arm1[jmp_indx] * (recv_Jmp_E_arm1*dt + 1) + level*(prov_Jmp_E_arm1*dt +1)
-        )/(E_arm1[jmp_indx] *dt + 1)
 
+    recv_arm1[jmp_indx] = (
+        recv_arm1[jmp_indx] * (recv_Jmp_E_arm1 * dt + 1)
+        + level * (prov_Jmp_E_arm1 * dt + 1)
+    ) / (E_arm1[jmp_indx] * dt + 1)
     recv_arm2[jmp_indx] = (
-        recv_arm2[jmp_indx] * (recv_Jmp_E_arm2 *dt + 1) + level*(prov_Jmp_E_arm2*dt +1)
-        )/(E_arm2[jmp_indx] *dt + 1)
-    
-    
-    cumE1 = np.cumsum(E_arm1)[jmp_indx]
-    cumE2 = np.cumsum(E_arm2)[jmp_indx]
-    
-    for i in range(jmp_indx+1, n) :
-        mask = recv_arm1[i-1] >= recv_arm2[i-1]
-        
+        recv_arm2[jmp_indx] * (recv_Jmp_E_arm2 * dt + 1)
+        + level * (prov_Jmp_E_arm2 * dt + 1)
+    ) / (E_arm2[jmp_indx] * dt + 1)
+
+    cumE1 = recv_Jmp_E_arm1 + prov_Jmp_E_arm1
+    cumE2 = recv_Jmp_E_arm2 + prov_Jmp_E_arm2
+
+    for i in range(jmp_indx + 1, n):
+        mask = recv_arm1[i - 1] >= recv_arm2[i - 1]
         if mask:
             cumE1 += 1
         else:
             cumE2 += 1
 
         E_arm1[i] = mask
-        E_arm2[i] = 1-mask
+        E_arm2[i] = 1 - mask
 
-        recv_arm1[i] = recv_arm1[i-1]*(1 + (cumE1-1)*dt) + mask * (mu1*dt + dB1[i]) # BM receieved upto this time for arm 1
-        E_arm1[i] = mask
-        recv_arm2[i] = recv_arm2[i-1]*(1 + (cumE2 -1)*dt) + (1-mask) * (mu2*dt + dB2[i]) # BM receieved upto this time for arm 2
-        E_arm2[i] = (1-mask)
-        
-        recv_arm1[i] = recv_arm1[i]/(1+cumE1*dt)     # mu_1
-        recv_arm2[i] = recv_arm2[i]/(1+cumE2*dt)     # mu_2
+        recv_arm1[i] = (
+            recv_arm1[i - 1] * (1 + (cumE1 - 1) * dt) + mask * (mu1 * dt + dB1[i])
+        ) / (1 + cumE1 * dt)
+        recv_arm2[i] = (
+            recv_arm2[i - 1] * (1 + (cumE2 - 1) * dt)
+            + (1 - mask) * (mu2 * dt + dB2[i])
+        ) / (1 + cumE2 * dt)
 
-    
     return recv_arm1, recv_arm2
 
-def UpdateReceiver(
-        recv_arm1,     
-        recv_arm2,
-        jmp_indx ,
-        recv_Jmp_E_arm1,
-        recv_Jmp_E_arm2,
-        prov_Jmp_E_arm1,
-        prov_Jmp_E_arm2,
-        level,
-        r1,r2,
-        mu1, mu2,  
-        time = time
-):
 
+# --- Global Configurations ---
+Tmax = 1000
+mu1 = 0.1
+mu2 = 1.2
+interval = 0.001
+time = np.arange(0, Tmax, interval)
+
+
+def ExchangeArms(mu1, mu2, time, r1, r2, alpha=0.0):
     n = len(time)
-    dt = time[1] - time[0]
-
     rng = np.random.default_rng(r1)
-    # pre-generate Brownian increments
+    dB1 = rng.normal(0, np.sqrt(interval), size=n)
+    rng = np.random.default_rng(r2)
+    dB2 = rng.normal(0, np.sqrt(interval), size=n)
+    return FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval)
+
+
+def UpdateReceiver(
+    recv_arm1,
+    recv_arm2,
+    jmp_indx,
+    recv_Jmp_E_arm1,
+    recv_Jmp_E_arm2,
+    prov_Jmp_E_arm1,
+    prov_Jmp_E_arm2,
+    level,
+    r1,
+    r2,
+):
+    n = len(time)
+    dt = interval
+    rng = np.random.default_rng(r1)
     dB1 = rng.normal(0, np.sqrt(dt), size=n)
     rng = np.random.default_rng(r2)
     dB2 = rng.normal(0, np.sqrt(dt), size=n)
-
-
-    recv_arm1, recv_arm2 = FastUpdateReceiver(
-        recv_arm1,     
+    return FastUpdateReceiver(
+        recv_arm1,
         recv_arm2,
-        jmp_indx ,
+        jmp_indx,
         recv_Jmp_E_arm1,
         recv_Jmp_E_arm2,
         prov_Jmp_E_arm1,
         prov_Jmp_E_arm2,
         level,
-        dB1,dB2,
-        mu1, mu2,  
-        time
+        dB1,
+        dB2,
+        mu1,
+        mu2,
+        dt,
     )
-    
-    running_min_arm1 = np.minimum.accumulate(recv_arm1)
-    running_min_arm2 = np.minimum.accumulate(recv_arm2)
-
-    # # pre-generate Brownian increments
-    # dB1 = np.random.normal(0, np.sqrt(dt), size=n)
-    # dB2 = np.random.normal(0, np.sqrt(dt), size=n)
-    
-    # E_arm1 = np.zeros(n)
-    # E_arm2 = np.zeros(n)
-
-    # running_min_arm1 = recv_arm1 # This will have the running minimum after the shock
-    # running_min_arm2 = recv_arm2 # This will have the running minimum after the shock
-    
-    # print(f"recv_Jmp_E_arm1 ,  prov_Jmp_E_arm1 = {recv_Jmp_E_arm1,  prov_Jmp_E_arm1} \n")
-    # print(f"recv_Jmp_E_arm2 ,  prov_Jmp_E_arm2 = {recv_Jmp_E_arm2,  prov_Jmp_E_arm2} \n")
-    # E_arm1[jmp_indx] = recv_Jmp_E_arm1 + prov_Jmp_E_arm1
-    # E_arm2[jmp_indx] = recv_Jmp_E_arm2 + prov_Jmp_E_arm2
-    
-    # recv_arm1[jmp_indx] = (
-    #     recv_arm1[jmp_indx] * (recv_Jmp_E_arm1*dt + 1) + level*(prov_Jmp_E_arm1*dt +1)
-    #     )/(E_arm1[jmp_indx] *dt + 1)
-
-    # recv_arm2[jmp_indx] = (
-    #     recv_arm2[jmp_indx] * (recv_Jmp_E_arm2 *dt + 1) + level*(prov_Jmp_E_arm2*dt +1)
-    #     )/(E_arm2[jmp_indx] *dt + 1)
-    
-    
-    # cumE1 = np.cumsum(E_arm1)[jmp_indx]
-    # cumE2 = np.cumsum(E_arm2)[jmp_indx]
-    
-    # for i in range(jmp_indx+1, n) :
-    #     mask = recv_arm1[i-1] >= recv_arm2[i-1]
-        
-    #     if mask:
-    #         cumE1 += 1
-    #     else:
-    #         cumE2 += 1
-
-    #     E_arm1[i] = mask
-    #     E_arm2[i] = 1-mask
-
-    #     recv_arm1[i] = recv_arm1[i-1]*(1 + (cumE1-1)*dt) + mask * (mu1*dt + dB1[i]) # BM receieved upto this time for arm 1
-    #     E_arm1[i] = mask
-    #     recv_arm2[i] = recv_arm2[i-1]*(1 + (cumE2 -1)*dt) + (1-mask) * (mu2*dt + dB2[i]) # BM receieved upto this time for arm 2
-    #     E_arm2[i] = (1-mask)
-        
-    #     recv_arm1[i] = recv_arm1[i]/(1+cumE1*dt)     # mu_1
-    #     recv_arm2[i] = recv_arm2[i]/(1+cumE2*dt)     # mu_2
-
-    # running_min_arm1 = np.minimum.accumulate(recv_arm1)
-    # running_min_arm2 = np.minimum.accumulate(recv_arm2)
 
 
-    # df = pd.DataFrame ({
-    #                 "min_arm1":running_min_arm1,
-    #                 "min_arm2":running_min_arm2,
-    #                 "mu_1": recv_arm1,
-    #                 "mu_2": recv_arm2,
-    #                 "effort_arm1":np.cumsum(E_arm1),
-    #                 "effort_arm2":np.cumsum(E_arm2),
-    #                 "BM1": np.cumsum(dB1),
-    #                 "BM2": np.cumsum(dB2)
-    #                 })
+# --- Symmetric Worker Engine ---
+def run_single_simulation(seeds, mu1, mu2, alpha):
+    """Handles a single symmetric dual-update step completely in system memory."""
+    r1, r2, r3, r4 = seeds
 
-    # fig = plt.figure(figsize=(10,6))
-    # fig.canvas.manager.set_window_title("Post Interaction")
-    # # Plot estimated means (or running processes)
-    # plt.plot(df["mu_1"], label=f"Arm 1={mu1}", color="blue")
-    # plt.plot(df["mu_2"], label=f"Arm 2={mu2}", color="green")
+    # Execute initial arm allocations
+    res_a1 = ExchangeArms(mu1, mu2, time, r1, r2, alpha)
+    res_a2 = ExchangeArms(mu1, mu2, time, r3, r4, alpha)
 
-    # plt.xlabel("Time")
-    # plt.ylabel("Value")
-    # plt.title("Arm Estimates / Brownian Motion with Drift")
+    indx1_a1, indx2_a1 = res_a1[6], res_a1[7]
+    indx1_a2, indx2_a2 = res_a2[6], res_a2[7]
 
-    # plt.legend()
-    # plt.grid(True)
+    max_a1 = max(indx1_a1, indx2_a1)
+    max_a2 = max(indx1_a2, indx2_a2)
 
-    
-    # plt.show()
-    
-    return recv_arm1, recv_arm2
+    giver = 2 if max_a1 > max_a2 else 1
+    jump_idx = max_a2 if giver == 2 else max_a1
+
+    # Non-communicating fallback path
+    if jump_idx < 0:
+        val1 = 1 if res_a1[2][-1] < res_a1[3][-1] else 0
+        val2 = 1 if res_a2[2][-1] < res_a2[3][-1] else 0
+        return (
+            "neg_jump",
+            (res_a1[2][-1], res_a1[3][-1], val1, res_a2[2][-1], res_a2[3][-1], val2),
+        )
+
+    # Symmetric updating path: both receivers update their estimates mutually
+    recv_min1_a1, recv_min2_a1 = UpdateReceiver(
+        res_a1[0].copy(),
+        res_a1[1].copy(),
+        jump_idx,
+        np.cumsum(res_a1[4])[jump_idx],
+        np.cumsum(res_a1[5])[jump_idx],
+        np.cumsum(res_a2[4])[jump_idx],
+        np.cumsum(res_a2[5])[jump_idx],
+        alpha,
+        r1,
+        r2,
+    )
+
+    recv_min1_a2, recv_min2_a2 = UpdateReceiver(
+        res_a2[0].copy(),
+        res_a2[1].copy(),
+        jump_idx,
+        np.cumsum(res_a2[4])[jump_idx],
+        np.cumsum(res_a2[5])[jump_idx],
+        np.cumsum(res_a1[4])[jump_idx],
+        np.cumsum(res_a1[5])[jump_idx],
+        alpha,
+        r3,
+        r4,
+    )
+
+    val1 = 1 if recv_min1_a1[-1] < recv_min2_a1[-1] else 0
+    val2 = 1 if recv_min1_a2[-1] < recv_min2_a2[-1] else 0
+
+    valb1 = 1 if res_a1[2][jump_idx] < res_a1[3][jump_idx] else 0
+    valb2 = 1 if res_a2[2][jump_idx] < res_a2[3][jump_idx] else 0
+
+    record = (
+        recv_min1_a1[-1],
+        recv_min2_a1[-1],
+        val1,
+        recv_min1_a2[-1],
+        recv_min2_a2[-1],
+        val2,
+        giver,
+        np.cumsum(res_a2[4])[jump_idx] + np.cumsum(res_a2[5])[jump_idx],
+        np.cumsum(res_a1[4])[jump_idx] + np.cumsum(res_a1[5])[jump_idx],
+        jump_idx,
+        (valb1 | valb2),
+        (val1 | val2),
+        (1 - ((valb1 | valb2) ^ (val1 | val2))),
+    )
+
+    return "symmetric", record
 
 
-
-#Call before the interaction
-# running_min_arm1_agnt1, running_min_arm2_agnt1, E_arm1_a1, E_arm2_a1, indx1_a1, indx2_a1 = ExchangeArms(mu1,mu2, time, alpha)
-
-def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
-    if os.path.exists("symmetric.csv"):
-        os.remove("symmetric.csv")
-
-    if os.path.exists("symmetric_negJump.csv"):
-        os.remove("symmetric_negJump.csv")
-            
+def Communication(mu1: float, mu2: float, alpha: float, outfile: TextIO):
+    print(f"Starting Multi-Core Symmetric Simulation for Alpha: {alpha}...")
     ss = np.random.SeedSequence(1230987654)
+    tasks = [child.generate_state(4) for child in ss.spawn(50000)]
+
+    symmetric_records = []
+    neg_jump_records = []
+
+    # Parallel core pipeline execution
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = [
+            executor.submit(run_single_simulation, task, mu1, mu2, alpha)
+            for task in tasks
+        ]
+        for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+            dtype, record = future.result()
+            if dtype == "symmetric":
+                symmetric_records.append(record)
+            else:
+                neg_jump_records.append(record)
+
+            if idx % 10000 == 0 and idx > 0:
+                print(f"Completed {idx}/50000 jobs...")
+
+    # Safe unified filesystem sweeps
+    df_sym = pd.DataFrame(symmetric_records)
+    df_neg = pd.DataFrame(neg_jump_records)
+
+    df_sym.to_csv("symmetric.csv", index=False)
+    df_neg.to_csv("symmetric_negJump.csv", index=False)
+
+    count1 = (
+        ((df_sym.iloc[:, 2] == 0) & (df_sym.iloc[:, 5] == 0)).sum()
+        if not df_sym.empty
+        else 0
+    )
+    count2 = (
+        ((df_neg.iloc[:, 2] == 0) & (df_neg.iloc[:, 5] == 0)).sum()
+        if not df_neg.empty
+        else 0
+    )
+
+    outfile.write(
+        fr"{alpha} & {df_sym.shape[0]} & {count1} & {count2 + count1} \\ \hline"
+    )
+    outfile.write("\n")
+    print(f"Finished Alpha {alpha}. Total Rows written: {df_sym.shape[0]}")
 
 
-    for child in ss.spawn(50000):
-        r1, r2, r3, r4 = child.generate_state(4)
+# --- Runtime System Protection entry-point ---
+if __name__ == "__main__":
+    fileName = "Symmetric_Result_" + str(mu1) + "_" + str(mu2) + ".txt"
+    if os.path.exists(fileName):
+        os.remove(fileName)
 
-        (running_min_arm1_agnt1, running_min_arm2_agnt1, 
-        Est_mu_arm1_a1, Est_mu_arm2_a1,  
-        E_arm1_a1, E_arm2_a1, 
-        indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, r1, r2, alpha)
-        
-        (running_min_arm1_agnt2, running_min_arm2_agnt2,
-        Est_mu_arm1_a2, Est_mu_arm2_a2, 
-        E_arm1_a2, E_arm2_a2, 
-        indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, r3, r4, alpha)
+    # ll = [
+    #     -0.01,
+    #     -0.001,
+    #     -0.0001,
+    #     -0.00001,
+    #     -0.000001,
+    #     -0.0000001,
+    #     -0.00000001,
+    #     -0.000000001,
+    #     -0.0000000001,
+    #     -0.00000000001,
+    # ]
 
-        #Calculate the jump index
+    ll = [
+        -3.0,
+        -0.46,
+        -0.41,
+        -0.36,
+        -0.31,
+        -0.26,
+        -0.21,
+        -0.16,
+        -0.11,
+        -0.06,
+        -0.03,
+        -0.01,
+        -0.001,
+        -0.0001,
+        -0.00001,
+        -0.000001,
+        -0.0000001,
+        -0.00000001,
+        -0.000000001,
+        -0.0000000001,
+        -0.00000000001
+    ]
 
-        print(f"indx1_a1={indx1_a1}, indx2_a1={indx2_a1}, indx1_a2={indx1_a2}, indx2_a2={indx2_a2}")
-        print(f"E_arm1_a1, E_arm2_a1={E_arm1_a1, E_arm2_a1}, E_arm1_a2, E_arm2_a2={E_arm1_a2, E_arm2_a2} ")
-        max_a1 = max(indx1_a1, indx2_a1)
-        max_a2 = max(indx1_a2, indx2_a2)
 
-        giver = 2 if max_a1 > max_a2 else 1
-
-        if (giver == 2) :
-            jump_idx = max_a2
-        else:
-            jump_idx = max_a1
-
-        print(f"giver={giver}, jump_idx={jump_idx}")
-
-        # print (E_arm1_a2)
-
-        if (jump_idx < 0):
-            with open("symmetric_negJump.csv", "a") as f:
-                val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
-                val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
-                
-                f.write(
-                    f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
-                    f"{val1}, "
-                    f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
-                    f"{val2} \n "
-                )
-            continue
-
-                
-        receiver_min_arm1_agnt1, receiver_min_arm2_agnt1 = UpdateReceiver(
-            running_min_arm1_agnt1,
-            running_min_arm2_agnt1,
-            jump_idx,
-            np.cumsum(E_arm1_a1)[jump_idx],
-            np.cumsum(E_arm2_a1)[jump_idx],
-            np.cumsum(E_arm1_a2)[jump_idx],
-            np.cumsum(E_arm2_a2)[jump_idx],
-            alpha,
-            r1,r2,
-            mu1,mu2
-        )
-        
-        receiver_min_arm1_agnt2, receiver_min_arm2_agnt2 = UpdateReceiver(
-            running_min_arm1_agnt2,
-            running_min_arm2_agnt2,
-            jump_idx,
-            np.cumsum(E_arm1_a2)[jump_idx],
-            np.cumsum(E_arm2_a2)[jump_idx],
-            np.cumsum(E_arm1_a1)[jump_idx],
-            np.cumsum(E_arm2_a1)[jump_idx],
-            alpha,
-            r3,r4,
-            mu1, mu2
-        )
-        
-        with open("symmetric.csv", "a") as f:
-            val1 = 1 if receiver_min_arm1_agnt1[-1] < receiver_min_arm2_agnt1[-1] else 0
-            val2 = 1 if receiver_min_arm1_agnt2[-1] < receiver_min_arm2_agnt2[-1] else 0
-
-            valb1 = 1 if Est_mu_arm1_a1[jump_idx] < Est_mu_arm2_a1[jump_idx] else 0
-            valb2 = 1 if Est_mu_arm1_a2[jump_idx] < Est_mu_arm2_a2[jump_idx] else 0
-            
-            f.write(
-                f"{receiver_min_arm1_agnt1[-1]}, {receiver_min_arm2_agnt1[-1]}, "
-                f"{val1}, "
-                f"{receiver_min_arm1_agnt2[-1]}, {receiver_min_arm2_agnt2[-1]}, "
-                f"{val2}, "
-                f"{giver}, "
-                f"{np.cumsum(E_arm1_a2)[jump_idx] + np.cumsum(E_arm2_a2)[jump_idx]}, "
-                f"{np.cumsum(E_arm1_a1)[jump_idx] + np.cumsum(E_arm2_a1)[jump_idx]}, "
-                f"{jump_idx} ,"
-                f"{valb1|valb2}, {val1|val2}, {1 - ((valb1|valb2)^(val1|val2))} \n"
-            )
-
-    if os.path.exists("symmetric.csv"):
-        ff_symmetric = pd.read_csv("symmetric.csv")
-        ff_negjumps = pd.read_csv("symmetric_negJump.csv")
-            
-        count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
-                (ff_symmetric.iloc[:, 5] == 0)).sum()
-        
-        
-        count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
-                (ff_negjumps.iloc[:, 5] == 0)).sum()
-        
-        outfile.write(fr"{alpha} & {ff_symmetric.shape[0]} & {count1} & {count2 + count1} \\ \hline")
-        outfile.write("\n")
-        
-        print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
-        print(f"Count2 = {count2+ count1} \n")
-
-    else :
-        ff_negjumps = pd.read_csv("symmetric_negJump.csv")
-        
-        count1 = 0
-        count2 = ((ff_negjumps.iloc[:, 2] == 0) & 
-                (ff_negjumps.iloc[:, 5] == 0)).sum()
-        
-        outfile.write(fr"{alpha} & {count1} & {count1} & {count2 + count1} \\ \hline")
-        outfile.write("\n")
-        
-        print(f"Count = \n", 0)
-        print(f"Count2 = {count2} \n")
-        
-# main block 
-
-fileName = "Symmetric_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
-
-if os.path.exists(fileName):
-    os.remove(fileName) 
-       
-    
-ll = [-3.0, -0.46, -0.41, -0.36, -0.31, -0.26, -0.21, -0.16, -0.11, -0.06, -0.03, -0.01]
-#ll = [-3.0, -0.46, -0.41, -0.36]
-
-file: TextIO = open(fileName, "a")
-file.write(r"""
+    with open(fileName, "a") as file:
+        file.write(
+            r"""
 \begin{table}[h!]
 \centering
 {\tiny
@@ -497,17 +377,17 @@ $\alpha$
 & {\fontsize{7}{9}\selectfont Symmetric + Non Communicating}
 \\
 \hline
-""")
+"""
+        )
 
-for ele in ll:
-    alpha = ele     
-    Communication(mu1, mu2, alpha, file)
-    
-file.write(r"""
+        for ele in ll:
+            Communication(mu1, mu2, ele, file)
+
+        file.write(
+            r"""
 \end{tabular}
 }
 }
 \end{table}
-""")
-
-file.close()
+"""
+        )
