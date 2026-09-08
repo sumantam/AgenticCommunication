@@ -45,6 +45,8 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
     for i in range(1, n):
 
+        # At every time step, a decision has to be made as to which arm to pull. 
+        # This decision is based on the estimated mean of the two arms at the previous time step.   
         mask = Est_mu_arm1[i-1] >= Est_mu_arm2[i-1]
 
         if mask:
@@ -61,6 +63,7 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
         E_arm1[i] = mask
         E_arm2[i] = 1 - mask
 
+        # At every time step, we update the estimated mean of the two arms. 
         Est_mu_arm1[i] = X_arm1[i] / (1 + cum1*interval)
         Est_mu_arm2[i] = X_arm2[i] / (1 + cum2*interval)
 
@@ -81,10 +84,12 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
     return running_min_arm1, running_min_arm2, Est_mu_arm1, Est_mu_arm2, E_arm1, E_arm2, index1, index2
 
-Tmax = 1000 #0.5 #0.2
-mu1 = 0.1
-mu2 = 1.2
-interval = .001 #.001
+
+
+Tmax = 1000 #0.5 #0.2   # Total time of simulation, change this or reduce to improve simulation.
+mu1 = 0.1 # mean of arm 1
+mu2 = 1.2 # mean of arm 2
+interval = .001 #.001 # time step size
 # alpha = -0.11 #-0.01 #-0.005
 
 # Break down the time into small intervals
@@ -97,17 +102,11 @@ def ExchangeArms(mu1, mu2, time, alpha = 0.0, r1=66666, r2=23411):
     n = len(time)
     dt = time[5] - time[4]
 
-    rng = np.random.default_rng(r1)
-    # pre-generate Brownian increments
-    dB1 = rng.normal(0, np.sqrt(interval), size=n)
-    rng = np.random.default_rng(r2)
-    dB2 = rng.normal(0, np.sqrt(interval), size=n)
-
-    print(np.mean(dB1), np.mean(dB2))
-    print(np.sum(dB1 > 0), np.sum(dB1 < 0))
-    print(np.sum(dB2 > 0), np.sum(dB2 < 0))
-    
-    
+    rng = np.random.default_rng(r1) # random seed for reproducibility with r1
+    dB1 = rng.normal(0, np.sqrt(interval), size=n)  # pre-generate Brownian increments 
+    rng = np.random.default_rng(r2) # random seed for reproducibility with r2
+    dB2 = rng.normal(0, np.sqrt(interval), size=n)  # pre-generate Brownian increments
+        
     res = FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval)
     
     running_min_arm1 = res[0]
@@ -119,43 +118,10 @@ def ExchangeArms(mu1, mu2, time, alpha = 0.0, r1=66666, r2=23411):
     index1 = res[6]
     index2 = res[7]
     
-    # # print(running_min_arm1)
-    # df = pd.DataFrame ({
-    #                 "min_arm1":running_min_arm1,
-    #                 "min_arm2":running_min_arm2,
-    #                 "mu_1": Est_mu_arm1,
-    #                 "mu_2": Est_mu_arm2,
-    #                 "effort_arm1":np.cumsum(E_arm1),
-    #                 "effort_arm2":np.cumsum(E_arm2),
-    #                 "BM1": np.cumsum(dB1),
-    #                 "BM2": np.cumsum(dB2)
-    #                 })
-    # # df.to_excel("arm.xlsx", index=False)
-    
-    
-    # plt.figure(figsize=(10,6))
-
-    # # Plot estimated means (or running processes)
-    # plt.plot(df["mu_1"], label=f"Arm 1 = {mu1}", color="blue")
-    # plt.plot(df["mu_2"], label=f"Arm 2 = {mu2}", color="green")
-
-    # plt.xlabel("Time")
-    # plt.ylabel("Value")
-    # plt.title("Arm Estimates / Brownian Motion with Drift")
-
-    # plt.legend()
-    # plt.grid(True)
-
-    # plt.show()
-
-    # with open("nocommunication.csv", "a") as f:
-    #     val = 1 if Est_mu_arm1[-1] < Est_mu_arm2[-1] else 0
-    #     f.write(f"{Est_mu_arm1[-1]},{Est_mu_arm2[-1]}, {val} \n")    
-    # # print(f"Last element of mu arm1 = {Est_mu_arm1[-1]}, Last element of mu arm2 = {Est_mu_arm2[-1]}")
     return running_min_arm1, running_min_arm2, Est_mu_arm1, Est_mu_arm2, E_arm1, E_arm2,  index1, index2 
-    # return X_arm1, X_arm2
 
 #This function is the part which simulates the dynamics post interaction.
+#This function is unused in this version of the code but has been kept in case any one wants to create the update of the arms.
 # @njit 
 def UpdateReceiver(
         recv_arm1,     
@@ -253,10 +219,16 @@ def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
     if os.path.exists("nocommunication.csv"):
         os.remove("nocommunication.csv")
 
-        
+
+    # fix a random seed sequence. 
+    # This is required to make sure that the simulation is reproducible        
     ss = np.random.SeedSequence(1230987654)
 
 
+    # The total number of simulations is 50000. 
+    # Each child should generate a thread to run a simulation for a given alpha.
+    # An average should be taken to get probability calculation. 
+        
     for child in ss.spawn(50000):
         r1, r2, r3, r4 = child.generate_state(4)
 
@@ -294,18 +266,15 @@ def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
         print(f"Count = {count1}, Rows = {ff_symmetric.shape[0]} \n")
         
 
-fileName = "NoCommunication_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
+# This is the main function which will run the simulation for a given alpha. 
+if __name__ == "__main__":    
 
-if os.path.exists(fileName):
-    os.remove(fileName) 
+    fileName = "NoCommunication_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
+
+    if os.path.exists(fileName):
+        os.remove(fileName) 
        
-    
-# ll = [-0.0, -0.00000000001, -0.0000000001, -0.000000001, -0.00000001, -0.0000001, -0.000001, -0.00001, -0.0001, -0.001, -0.01]
-# ll = [-0.01, -0.001, -0.0001, -0.00001, -0.000001, -0.0000001, -0.00000001, -0.000000001,  -0.0000000001, -0.00000000001]
-
-#ll = [-3.0, -0.46]
-
-ll = [
+    ll = [
         -3.0,
         -0.46,
         -0.41,
@@ -330,32 +299,31 @@ ll = [
     ]
 
 
-file: TextIO = open(fileName, "a")
-file.write(r"""
-\begin{table}[h!]
-\centering
-{\tiny
-\resizebox{\textwidth}{!}{
-\begin{tabular}{|l|p{1cm}|p{1.1cm}|}
-\hline
-$\alpha$
-& {\fontsize{7}{9}\selectfont Total Communication}
-& {\fontsize{7}{9}\selectfont No communication sub optimal}
-\\
-\hline
-""")
+    file: TextIO = open(fileName, "a")
+    file.write(r"""
+    \begin{table}[h!]
+    \centering
+    {\tiny
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{|l|p{1cm}|p{1.1cm}|}
+    \hline
+    $\alpha$
+    & {\fontsize{7}{9}\selectfont Total Communication}
+    & {\fontsize{7}{9}\selectfont No communication sub optimal}
+    \\\hline
+    """)
 
-for ele in ll:
-    alpha = ele 
-    print(f"Alpha {alpha}") 
-    sleep(30)   
-    Communication(mu1, mu2, alpha, file)
+    for ele in ll:
+        alpha = ele 
+        print(f"Alpha {alpha}") 
+        #sleep(30)   
+        Communication(mu1, mu2, alpha, file)
     
-file.write(r"""
-\end{tabular}
-}
-}
-\end{table}
-""")
+    file.write(r"""
+    \end{tabular}
+    }
+    }
+    \end{table}
+    """)
 
-file.close()
+    file.close()
