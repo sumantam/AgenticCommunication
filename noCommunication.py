@@ -29,6 +29,46 @@ def min_accumulate ( Est_mu_arm):
 @njit #(forceobj=True)
 def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
+    """
+    Simulates a two-armed bandit process driven by Brownian motion with drift, 
+    evaluating stopping times relative to a threshold alpha.
+
+    Parameters
+    ----------
+    mu1 : float
+        Drift coefficient (mean reward rate) for Arm 1.
+    mu2 : float
+        Drift coefficient (mean reward rate) for Arm 2.
+    time : np.ndarray
+        Array of discrete time steps for the simulation.
+    alpha : float
+        Stopping boundary threshold for the running minimum process.
+    dB1 : np.ndarray
+        Pre-generated Brownian increments for Arm 1.
+    dB2 : np.ndarray
+        Pre-generated Brownian increments for Arm 2.
+    interval : float
+        Size of the discrete time step (dt).
+
+    Returns
+    -------
+    running_min_arm1 : np.ndarray
+        Running minimum of the estimated mean for Arm 1.
+    running_min_arm2 : np.ndarray
+        Running minimum of the estimated mean for Arm 2.
+    Est_mu_arm1 : np.ndarray
+        Estimated mean trajectory for Arm 1 over time.
+    Est_mu_arm2 : np.ndarray
+        Estimated mean trajectory for Arm 2 over time.
+    E_arm1 : np.ndarray
+        Indicator array showing when Arm 1 was pulled.
+    E_arm2 : np.ndarray
+        Indicator array showing when Arm 2 was pulled.
+    index1 : int
+        First index where Arm 1's running minimum breaches alpha (-1 if none).
+    index2 : int
+        First index where Arm 2's running minimum breaches alpha (-1 if none).
+    """
     n = len(time)
 
     X_arm1 = np.zeros(n)
@@ -98,7 +138,45 @@ time = np.arange(0, Tmax, interval)
 # This function is the main subroutine of Ankur's paper
 # @njit
 def ExchangeArms(mu1, mu2, time, alpha = 0.0, r1=66666, r2=23411):
+    """
+    Initializes simulation parameters and executes the core bandit simulation.
 
+    This function serves as the primary interface for running a single instance 
+    of the two-armed bandit simulation for a specific set of parameters.
+
+    Parameters
+    ----------
+    mu1 : float
+        Mean reward rate for Arm 1.
+    mu2 : float
+        Mean reward rate for Arm 2.
+    time : np.ndarray
+        Array defining the simulation time horizon and steps.
+    alpha : float, optional
+        Stopping threshold for the running minimum process. Default is 0.0.
+    r1 : int, optional
+        Random seed for Arm 1's Brownian motion. Default is 66666.
+    r2 : int, optional
+        Random seed for Arm 2's Brownian motion. Default is 23411.
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - running_min_arm1 (np.ndarray): Running minimum of Arm 1's estimated mean.
+        - running_min_arm2 (np.ndarray): Running minimum of Arm 2's estimated mean.
+        - Est_mu_arm1 (np.ndarray): Estimated mean trajectory for Arm 1.
+        - Est_mu_arm2 (np.ndarray): Estimated mean trajectory for Arm 2.
+        - E_arm1 (np.ndarray): Indicator array for Arm 1 selections.
+        - E_arm2 (np.ndarray): Indicator array for Arm 2 selections.
+        - index1 (int): First index where Arm 1's running minimum breaches alpha.
+        - index2 (int): First index where Arm 2's running minimum breaches alpha.
+
+    Example
+    -------
+    >>> results = ExchangeArms(mu1=0.1, mu2=0.5, time=np.arange(0, 100, 0.01), alpha=-0.1)
+    >>> print(results[6])  # index1
+    """
     n = len(time)
     dt = time[5] - time[4]
 
@@ -216,6 +294,28 @@ def UpdateReceiver(
 
 
 def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
+    """
+    Executes a parallelized Monte Carlo simulation across multiple random 
+    seed sequences (5,000 iterations) to evaluate performance metrics under 
+    a given threshold alpha, appending results to a CSV log and writing 
+    formatted LaTeX table rows.
+
+    Parameters
+    ----------
+    mu1 : float
+        Drift coefficient for Arm 1.
+    mu2 : float
+        Drift coefficient for Arm 2.
+    alpha : float
+        Current threshold value being tested.
+    outfile : TextIO
+        Active file handle to write LaTeX table rows.
+
+    Returns
+    -------
+    None
+    """
+    
     if os.path.exists("nocommunication.csv"):
         os.remove("nocommunication.csv")
 
@@ -273,7 +373,8 @@ if __name__ == "__main__":
 
     if os.path.exists(fileName):
         os.remove(fileName) 
-       
+
+    """ List of alpha values to be tested. """  
     ll = [
         -3.0,
         -0.46,
