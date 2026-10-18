@@ -4,9 +4,10 @@ import numpy as np
 import os
 import pandas as pd
 from numba import njit
-from typing import TextIO
+from typing import TextIO, Optional, List
+import argparse
 
-matplotlib.use("TkAgg")
+# matplotlib.use("TkAgg")
 
 # --- Numba Compiled Subroutines (Keep these fast) ---
 @njit
@@ -138,15 +139,17 @@ def FastUpdateReceiver(
     return recv_arm1, recv_arm2
 
 
-# --- Global Parameters Configuration ---
-Tmax = 1000
-mu1 = 0.1
-mu2 = 1.2
-interval = 0.001
-time = np.arange(0, Tmax, interval)
+_time_cache = {}
 
 
-def ExchangeArms(mu1, mu2, time, r1, r2, alpha=0.0):
+def get_time(t_max: float, interval: float) -> np.ndarray:
+    key = (t_max, interval)
+    if key not in _time_cache:
+        _time_cache[key] = np.arange(0, t_max, interval)
+    return _time_cache[key]
+
+
+def ExchangeArms(mu1, mu2, time, r1, r2, alpha=0.0, interval=0.001):
     n = len(time)
     rng = np.random.default_rng(r1)
     dB1 = rng.normal(0, np.sqrt(interval), size=n)
@@ -166,6 +169,10 @@ def UpdateReceiver(
     level,
     r1,
     r2,
+    mu1,
+    mu2,
+    time,
+    interval=0.001,
 ):
     n = len(time)
     dt = interval
@@ -191,13 +198,14 @@ def UpdateReceiver(
 
 
 # --- Worker Target for Multiprocessing Pipeline ---
-def run_single_simulation(seeds, mu1, mu2, alpha):
+def run_single_simulation(seeds, mu1, mu2, alpha, t_max=20.0, interval=0.001):
     """Executes a single workflow simulation iteration in memory."""
     r1, r2, r3, r4 = seeds
+    time = get_time(t_max, interval)
 
     # Run Agent 1 & Agent 2
-    res_a1 = ExchangeArms(mu1, mu2, time, r1, r2, alpha)
-    res_a2 = ExchangeArms(mu1, mu2, time, r3, r4, alpha)
+    res_a1 = ExchangeArms(mu1, mu2, time, r1, r2, alpha, interval)
+    res_a2 = ExchangeArms(mu1, mu2, time, r3, r4, alpha, interval)
 
     indx1_a1, indx2_a1 = res_a1[6], res_a1[7]
     indx1_a2, indx2_a2 = res_a2[6], res_a2[7]
@@ -230,6 +238,10 @@ def run_single_simulation(seeds, mu1, mu2, alpha):
             alpha,
             r3,
             r4,
+            mu1,
+            mu2,
+            time,
+            interval,
         )
         val1 = 1 if res_a1[2][-1] < res_a1[3][-1] else 0
         val2 = 1 if recv_min1[-1] < recv_min2[-1] else 0
@@ -262,6 +274,10 @@ def run_single_simulation(seeds, mu1, mu2, alpha):
             alpha,
             r1,
             r2,
+            mu1,
+            mu2,
+            time,
+            interval,
         )
         val2 = 1 if res_a2[2][-1] < res_a2[3][-1] else 0
         val1 = 1 if recv_min1[-1] < recv_min2[-1] else 0
@@ -286,7 +302,7 @@ def run_single_simulation(seeds, mu1, mu2, alpha):
     return "asymmetric", record
 
 
-def Communication(mu1: float, mu2: float, alpha: float, outfile: TextIO):
+def Communication(mu1: float, mu2: float, alpha: float, t_max: float, interval: float, outfile: TextIO):
     print(f"Starting Multi-Core Simulation for Alpha: {alpha}...")
     ss = np.random.SeedSequence(1230987654)
     tasks = [child.generate_state(4) for child in ss.spawn(50000)]
@@ -297,7 +313,7 @@ def Communication(mu1: float, mu2: float, alpha: float, outfile: TextIO):
     # Parallelize iterations across every CPU core core via ProcessPoolExecutor
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = [
-            executor.submit(run_single_simulation, task, mu1, mu2, alpha)
+            executor.submit(run_single_simulation, task, mu1, mu2, alpha, t_max, interval)
             for task in tasks
         ]
         for idx, future in enumerate(concurrent.futures.as_completed(futures)):
@@ -336,34 +352,41 @@ def Communication(mu1: float, mu2: float, alpha: float, outfile: TextIO):
 
 
 # --- Main Runtime Process Entrypoint ---
-if __name__ == "__main__":
-    fileName = "Asymmetric_Result_" + str(mu1) + "_" + str(mu2) + ".txt"
+def main(
+    mu1: float = 0.1,
+    mu2: float = 1.2,
+    t_max: float = 20.0,
+    interval: float = 0.001,
+    alphas: Optional[List[float]] = None,
+):
+    fileName = f"Asymmetric_Result_{mu1}_{mu2}.txt"
     if os.path.exists(fileName):
         os.remove(fileName)
 
-    ll = [
-        -3.0,
-        -0.46,
-        -0.41,
-        -0.36,
-        -0.31,
-        -0.26,
-        -0.21,
-        -0.16,
-        -0.11,
-        -0.06,
-        -0.03,
-        -0.01,
-        -0.001,
-        -0.0001,
-        -0.00001,
-        -0.000001,
-        -0.0000001,
-        -0.00000001,
-        -0.000000001,
-        -0.0000000001,
-        -0.00000000001
-    ]
+    if alphas is None:
+        alphas = [
+            -3.0,
+            -0.46,
+            -0.41,
+            -0.36,
+            -0.31,
+            -0.26,
+            -0.21,
+            -0.16,
+            -0.11,
+            -0.06,
+            -0.03,
+            -0.01,
+            -0.001,
+            -0.0001,
+            -0.00001,
+            -0.000001,
+            -0.0000001,
+            -0.00000001,
+            -0.000000001,
+            -0.0000000001,
+            -0.00000000001,
+        ]
 
     with open(fileName, "a") as file:
         file.write(
@@ -383,8 +406,8 @@ $\alpha$
 """
         )
 
-        for ele in ll:
-            Communication(mu1, mu2, ele, file)
+        for ele in alphas:
+            Communication(mu1, mu2, ele, t_max, interval, file)
 
         file.write(
             r"""
@@ -394,3 +417,16 @@ $\alpha$
 \end{table}
 """
         )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run Multi-Core Asymmetric Communication simulation.")
+    parser.add_argument("--mu1", type=float, default=0.1, help="Drift coefficient for Arm 1 (default: 0.1)")
+    parser.add_argument("--mu2", type=float, default=1.2, help="Drift coefficient for Arm 2 (default: 1.2)")
+    parser.add_argument("--t_max", type=float, default=20.0, help="Maximum simulation time (default: 20.0)")
+    parser.add_argument("--interval", type=float, default=0.001, help="Time step size dt (default: 0.001)")
+    parser.add_argument("--alpha", type=float, default=None, help="Run simulation for a single alpha instead of default list")
+
+    args = parser.parse_args()
+    alpha_list = [args.alpha] if args.alpha is not None else None
+    main(mu1=args.mu1, mu2=args.mu2, t_max=args.t_max, interval=args.interval, alphas=alpha_list)

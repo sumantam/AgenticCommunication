@@ -1,13 +1,15 @@
 import matplotlib
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
 from numba import njit
-from typing import TextIO
+from typing import TextIO, Optional, List
 from time import sleep
+import argparse
+#from google.colab import files
 
 
 @njit
@@ -126,18 +128,19 @@ def FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval):
 
 
 
-Tmax = 1000 #0.5 #0.2   # Total time of simulation, change this or reduce to improve simulation.
-mu1 = 0.1 # mean of arm 1
-mu2 = 1.2 # mean of arm 2
-interval = .001 #.001 # time step size
-# alpha = -0.11 #-0.01 #-0.005
+_time_cache = {}
 
-# Break down the time into small intervals
-time = np.arange(0, Tmax, interval)
+
+def get_time(t_max: float, interval: float) -> np.ndarray:
+    key = (t_max, interval)
+    if key not in _time_cache:
+        _time_cache[key] = np.arange(0, t_max, interval)
+    return _time_cache[key]
+
 
 # This function is the main subroutine of Ankur's paper
 # @njit
-def ExchangeArms(mu1, mu2, time, alpha = 0.0, r1=66666, r2=23411):
+def ExchangeArms(mu1: float, mu2: float, time: np.ndarray, alpha: float = 0.0, r1: int = 66666, r2: int = 23411, interval: float = 0.001):
     """
     Initializes simulation parameters and executes the core bandit simulation.
 
@@ -204,17 +207,20 @@ def ExchangeArms(mu1, mu2, time, alpha = 0.0, r1=66666, r2=23411):
 def UpdateReceiver(
         recv_arm1,     
         recv_arm2,
-        jmp_indx ,
+        jmp_indx,
         recv_Jmp_E_arm1,
         recv_Jmp_E_arm2,
         prov_Jmp_E_arm1,
         prov_Jmp_E_arm2,
         level, 
-        time = time
+        mu1: float,
+        mu2: float,
+        time: np.ndarray,
+        interval: float = 0.001,
 ):
 
     n = len(time)
-    dt = time[1] - time[0]
+    dt = interval
 
     r1 = 445577
     r2 = 888888
@@ -293,10 +299,10 @@ def UpdateReceiver(
 # running_min_arm1_agnt1, running_min_arm2_agnt1, E_arm1_a1, E_arm2_a1, indx1_a1, indx2_a1 = ExchangeArms(mu1,mu2, time, alpha)
 
 
-def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
+def Communication(mu1: float, mu2: float, alpha: float, time: np.ndarray, interval: float, outfile: TextIO):
     """
     Executes a parallelized Monte Carlo simulation across multiple random 
-    seed sequences (5,000 iterations) to evaluate performance metrics under 
+    seed sequences (50,000 iterations) to evaluate performance metrics under 
     a given threshold alpha, appending results to a CSV log and writing 
     formatted LaTeX table rows.
 
@@ -328,35 +334,48 @@ def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
     # The total number of simulations is 50000. 
     # Each child should generate a thread to run a simulation for a given alpha.
     # An average should be taken to get probability calculation. 
-        
+    rows = [] 
     for child in ss.spawn(50000):
         r1, r2, r3, r4 = child.generate_state(4)
 
-        (running_min_arm1_agnt1, running_min_arm2_agnt1, 
-        Est_mu_arm1_a1, Est_mu_arm2_a1, 
-        E_arm1_a1, E_arm2_a1, 
-        indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, alpha,r1, r2)
+        # (running_min_arm1_agnt1, running_min_arm2_agnt1, 
+        # Est_mu_arm1_a1, Est_mu_arm2_a1, 
+        # E_arm1_a1, E_arm2_a1, 
+        # indx1_a1, indx2_a1) = ExchangeArms(mu1,mu2, time, alpha,r1, r2)
 
-        (running_min_arm1_agnt2, running_min_arm2_agnt2, 
-        Est_mu_arm1_a2, Est_mu_arm2_a2, 
-        E_arm1_a2, E_arm2_a2, 
-        indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, alpha,r3, r4)
+        # (running_min_arm1_agnt2, running_min_arm2_agnt2, 
+        # Est_mu_arm1_a2, Est_mu_arm2_a2, 
+        # E_arm1_a2, E_arm2_a2, 
+        # indx1_a2, indx2_a2) = ExchangeArms(mu1,mu2, time, alpha,r3, r4)
 
+        a1 = ExchangeArms(mu1, mu2, time, alpha, r1, r2, interval)
+        a2 = ExchangeArms(mu1, mu2, time, alpha, r3, r4, interval)
 
-        with open("nocommunication.csv", "a") as f:
-                val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
-                val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
+        val1 = 1 if a1[2][-1] < a1[3][-1] else 0
+        val2 = 1 if a2[2][-1] < a2[3][-1] else 0
+        rows.append((a1[2][-1], a1[3][-1], val1,
+                    a2[2][-1], a2[3][-1], val2))
 
-                f.write(
-                    f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
-                    f"{val1}, "
-                    f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
-                    f"{val2}, "
-                    f"\n"
-                )
+    df = pd.DataFrame(rows, columns=[
+        "mu1_a1","mu2_a1","val1","mu1_a2","mu2_a2","val2"
+    ])
+    df.to_csv(f"nocommunication_{alpha}.csv", index=False)
 
-    if os.path.exists("nocommunication.csv"):
-        ff_symmetric = pd.read_csv("nocommunication.csv")
+        
+    # with open("nocommunication.csv", "a") as f:
+    #             val1 = 1 if Est_mu_arm1_a1[-1] < Est_mu_arm2_a1[-1] else 0
+    #             val2 = 1 if Est_mu_arm1_a2[-1] < Est_mu_arm2_a2[-1] else 0
+
+    #             f.write(
+    #                 f"{Est_mu_arm1_a1[-1]}, {Est_mu_arm2_a1[-1]}, "
+    #                 f"{val1}, "
+    #                 f"{Est_mu_arm1_a2[-1]}, {Est_mu_arm2_a2[-1]}, "
+    #                 f"{val2}, "
+    #                 f"\n"
+    #             )
+
+    if os.path.exists(f"nocommunication_{alpha}.csv"):
+        ff_symmetric = pd.read_csv(f"nocommunication_{alpha}.csv")
             
         count1 = ((ff_symmetric.iloc[:, 2] == 0) & 
                 (ff_symmetric.iloc[:, 5] == 0)).sum()
@@ -367,41 +386,48 @@ def Communication(mu1:float, mu2:float, alpha:float, outfile:TextIO):
         
 
 # This is the main function which will run the simulation for a given alpha. 
-if __name__ == "__main__":    
-
-    fileName = "NoCommunication_Result_"+ str(mu1)+"_"+ str(mu2)+".txt"
+def main(
+    mu1: float = 0.1,
+    mu2: float = 1.2,
+    t_max: float = 10.0,
+    interval: float = 0.001,
+    alphas: Optional[List[float]] = None,
+):
+    fileName = f"NoCommunication_Result_{mu1}_{mu2}.txt"
 
     if os.path.exists(fileName):
         os.remove(fileName) 
 
-    """ List of alpha values to be tested. """  
-    ll = [
-        -3.0,
-        -0.46,
-        -0.41,
-        -0.36,
-        -0.31,
-        -0.26,
-        -0.21,
-        -0.16,
-        -0.11,
-        -0.06,
-        -0.03,
-        -0.01,
-        -0.001,
-        -0.0001,
-        -0.00001,
-        -0.000001,
-        -0.0000001,
-        -0.00000001,
-        -0.000000001,
-        -0.0000000001,
-        -0.00000000001
-    ]
+    if alphas is None:
+        """ List of alpha values to be tested. """  
+        alphas = [
+            -3.0,
+            -0.46,
+            -0.41,
+            -0.36,
+            -0.31,
+            -0.26,
+            -0.21,
+            -0.16,
+            -0.11,
+            -0.06,
+            -0.03,
+            -0.01,
+            -0.001,
+            -0.0001,
+            -0.00001,
+            -0.000001,
+            -0.0000001,
+            -0.00000001,
+            -0.000000001,
+            -0.0000000001,
+            -0.00000000001
+        ]
 
+    time = get_time(t_max, interval)
 
-    file: TextIO = open(fileName, "a")
-    file.write(r"""
+    with open(fileName, "a") as file:
+        file.write(r"""
     \begin{table}[h!]
     \centering
     {\tiny
@@ -414,17 +440,27 @@ if __name__ == "__main__":
     \\\hline
     """)
 
-    for ele in ll:
-        alpha = ele 
-        print(f"Alpha {alpha}") 
-        #sleep(30)   
-        Communication(mu1, mu2, alpha, file)
-    
-    file.write(r"""
+        for ele in alphas:
+            alpha = ele 
+            print(f"Alpha {alpha}") 
+            Communication(mu1, mu2, alpha, time, interval, file)
+        
+        file.write(r"""
     \end{tabular}
     }
     }
     \end{table}
     """)
 
-    file.close()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run No-Communication simulation.")
+    parser.add_argument("--mu1", type=float, default=0.1, help="Drift coefficient for Arm 1 (default: 0.1)")
+    parser.add_argument("--mu2", type=float, default=1.2, help="Drift coefficient for Arm 2 (default: 1.2)")
+    parser.add_argument("--t_max", type=float, default=10.0, help="Maximum simulation time (default: 10.0)")
+    parser.add_argument("--interval", type=float, default=0.001, help="Time step size dt (default: 0.001)")
+    parser.add_argument("--alpha", type=float, default=None, help="Run simulation for a single alpha instead of default list")
+
+    args = parser.parse_args()
+    alpha_list = [args.alpha] if args.alpha is not None else None
+    main(mu1=args.mu1, mu2=args.mu2, t_max=args.t_max, interval=args.interval, alphas=alpha_list)
