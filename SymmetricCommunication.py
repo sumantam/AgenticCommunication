@@ -328,7 +328,7 @@ def Communication(mu1: float, mu2: float, alpha: float, t_max: float, interval: 
     )
 
     outfile.write(
-        fr"{alpha} & {df_sym.shape[0]} & {count1} & {count2 + count1} \\ \hline"
+        fr"{alpha:<10} & {df_sym.shape[0]:<10} & {count1:<10} & {count2 + count1:<10}         \\ \hline"
     )
     outfile.write("\n")
     print(f"Finished Alpha {alpha}. Total Rows written: {df_sym.shape[0]}")

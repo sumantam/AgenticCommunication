@@ -155,6 +155,7 @@ def ExchangeArms(mu1, mu2, time, r1, r2, alpha=0.0, interval=0.001):
     dB1 = rng.normal(0, np.sqrt(interval), size=n)
     rng = np.random.default_rng(r2)
     dB2 = rng.normal(0, np.sqrt(interval), size=n)
+    # print(f"mu1 :{mu1},  mu2: {mu2}, alpha: {alpha} time: {time} \n")
     return FastExchangeArms(mu1, mu2, time, alpha, dB1, dB2, interval)
 
 
@@ -345,7 +346,7 @@ def Communication(mu1: float, mu2: float, alpha: float, t_max: float, interval: 
     )
 
     outfile.write(
-        fr"{alpha} & {df_asym.shape[0]} & {count1} & {count2 + count1} \\ \hline"
+        fr"{alpha:<10} & {df_asym.shape[0]:<10} & {count1:<10} & {count2 + count1:<10} \\ \hline"
     )
     outfile.write("\n")
     print(f"Finished Alpha {alpha}. Total Rows written: {df_asym.shape[0]}")
