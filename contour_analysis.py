@@ -38,7 +38,157 @@ def safe_name(value):
     return re.sub(r"[^0-9A-Za-z_.-]+", "_", f"{value:g}")
 
 
-def add_scattered_contour(ax, x, y, z, title, xlabel, ylabel,
+def add_scattered_contour(
+    ax,
+    x,
+    y,
+    z,
+    title,
+    xlabel,
+    ylabel,
+    cmap="viridis",
+    diverging=False,
+    annotate_points=True,
+    n_levels=10,
+):
+    """
+    Draw contours for scattered 2-D observations.
+    Falls back to a scatter plot if there are too few non-collinear points.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+
+    valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    x, y, z = x[valid], y[valid], z[valid]
+
+    # Average duplicate coordinates, if any.
+    points = pd.DataFrame({"x": x, "y": y, "z": z})
+    points = points.groupby(["x", "y"], as_index=False)["z"].mean()
+    x, y, z = points["x"].to_numpy(), points["y"].to_numpy(), points["z"].to_numpy()
+
+    ax.set_title(title, fontsize=11, pad=8)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+
+    if len(x) < 3 or np.linalg.matrix_rank(
+        np.column_stack([x - x.mean(), y - y.mean()])
+    ) < 2:
+        sc = ax.scatter(x, y, c=z, cmap=cmap, s=65, edgecolors="black", zorder=3)
+        for xi, yi, zi in zip(x, y, z):
+            ax.annotate(
+                f"{zi:,.0f}",
+                (xi, yi),
+                xytext=(4, 4),
+                textcoords="offset points",
+                fontsize=7,
+        )
+        plt.colorbar(sc, ax=ax, label="Suboptimal outcomes (count)")
+        ax.text(
+            0.03,
+            0.97,
+            "Too few non-collinear points for contours",
+            transform=ax.transAxes,
+            va="top",
+            fontsize=8,
+        )
+        return
+
+    triangulation = mtri.Triangulation(x, y)
+
+    # Mask very long triangles to reduce interpolation across large gaps.
+    triangles = triangulation.triangles
+    coords = np.column_stack([x, y])
+    tri_edges = np.stack(
+        [
+          np.linalg.norm(coords[triangles[:, 0]] - coords[triangles[:, 1]], axis=1),
+          np.linalg.norm(coords[triangles[:, 1]] - coords[triangles[:, 2]], axis=1),
+          np.linalg.norm(coords[triangles[:, 2]] - coords[triangles[:, 0]], axis=1),
+      ],
+      axis=1,
+    )
+    all_edges = tri_edges.ravel()
+    typical_edge = np.median(all_edges) if len(all_edges) else np.inf
+    triangulation.set_mask(np.any(tri_edges > 2.5 * typical_edge, axis=1))
+
+    if diverging:
+        active_cmap = "RdBu_r" if cmap == "viridis" else cmap
+        bound = np.nanmax(np.abs(z))
+        if not np.isfinite(bound) or bound == 0:
+            bound = 1.0
+        levels = np.linspace(-bound, bound, n_levels + (1 if n_levels % 2 == 0 else 0))
+        cf = ax.tricontourf(
+            triangulation, z, levels=levels, cmap=active_cmap, extend="both"
+        )
+        cs = ax.tricontour(
+            triangulation, z, levels=levels, colors="black", linewidths=0.6, alpha=0.75
+        )
+        ax.tricontour(
+            triangulation, z, levels=[0], colors="black", linewidths=1.5, linestyles="-"
+        )
+    else:
+        zmin, zmax = np.nanmin(z), np.nanmax(z)
+        if np.isclose(zmin, zmax):
+            levels = np.linspace(zmin - 0.5, zmax + 0.5, 8)
+        else:
+            levels = np.linspace(zmin, zmax, n_levels)
+        cf = ax.tricontourf(triangulation, z, levels=levels, cmap=cmap, extend="both")
+        cs = ax.tricontour(
+            triangulation, z, levels=levels, colors="black", linewidths=0.65, alpha=0.75
+        )
+
+    # Label every other contour line to avoid visual clutter
+    clabel_levels = cs.levels[::2] if len(cs.levels) > 6 else cs.levels
+    ax.clabel(
+        cs,
+        levels=clabel_levels,
+        inline=True,
+        inline_spacing=4,
+        fontsize=7.5,
+        fmt=lambda val: f"{val:,.0f}",
+    )
+
+    ymin, ymax = np.nanmin(y), np.nanmax(y)
+    ax.set_ylim(ymin - 0.15, ymax + 0.18)
+
+    ax.scatter(
+        x,
+        y,
+        c="black",
+        s=16,
+        alpha=0.8,
+        zorder=4,
+        label="Observed parameter pair",
+    )
+
+    if annotate_points:
+        # Alternate vertical offsets slightly so adjacent horizontal labels collide less
+        y_offsets = [6, -13]
+        for idx, (xi, yi, zi) in enumerate(zip(x, y, z)):
+            dy = y_offsets[idx % len(y_offsets)]
+            ax.annotate(
+                f"{zi:,.0f}",
+                (xi, yi),
+                xytext=(0, dy),
+                textcoords="offset points",
+                ha="center",
+                fontsize=7,
+                zorder=5,
+                bbox=dict(
+                    boxstyle="round,pad=0.12",
+                    fc="white",
+                    ec="0.6",
+                    lw=0.5,
+                    alpha=0.82,
+                ),
+            )
+
+    ax.legend(loc="upper left", fontsize=7.5, framealpha=0.9)
+    cbar = plt.colorbar(cf, ax=ax, label="Suboptimal outcomes (count)")
+    cbar.ax.tick_params(labelsize=8)
+
+
+def old_add_scattered_contour(ax, x, y, z, title, xlabel, ylabel,
                           cmap="viridis", diverging=False):
     """
     Draw contours for scattered 2-D observations.
@@ -115,8 +265,14 @@ def add_scattered_contour(ax, x, y, z, title, xlabel, ylabel,
     # Explicit contour levels
     levels = np.arange(1000, 10001, 1000)
 
+    zmin, zmax = np.nanmin(z), np.nanmax(z)
+    if np.isclose(zmin, zmax):
+        levels = np.linspace(zmin - 0.5, zmax + 0.5, 8)
+    else:
+        levels = np.linspace(zmin, zmax, 14)
+
     # Include the exact value we want to investigate
-    levels = np.sort(np.unique(np.append(levels, 7564)))
+    # levels = np.sort(np.unique(np.append(levels, 7564)))
 
     # Draw filled contours
     cf = ax.tricontourf(
@@ -142,6 +298,8 @@ def add_scattered_contour(ax, x, y, z, title, xlabel, ylabel,
         fmt=lambda value: f"{value:,.0f}"
     )
 
+    ymin, ymax = np.nanmin(y), np.nanmax(y)
+    ax.set_ylim(ymin -0.15, ymax + 0.15)
     # Show the actual observed values at each point
     for xi, yi, zi in zip(x, y, z):
         ax.annotate(
